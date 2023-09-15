@@ -58,6 +58,25 @@ class DatabaseUtility:
             logger.error(f"Error executing query: {err}")
             return Exception(err)
 
+    def execute_many(self, query, data=None):
+        """
+        Execute a SQL query.
+        :param query: SQL query.
+        :param data: List of tuples containing data to be inserted.
+        :return: Query Result.
+        """
+        try:
+            if not self.connection:
+                self.connect()
+            cursor = self.connection.cursor()
+            cursor.executemany(query, data)  # Using executemany for multiple insertions
+            self.connection.commit()  # Commit the changes to the database
+            cursor.close()
+        except mysql.connector.Error as err:
+            logging.error(f"Error executing query: {err}")
+            raise Exception(err)
+
+
     def close_connection(self):
         """
         Close the database connection.

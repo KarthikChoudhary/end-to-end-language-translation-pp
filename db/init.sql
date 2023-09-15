@@ -18,8 +18,16 @@ CREATE TABLE IF NOT EXISTS translations_db.english_sentences (
 );
 
 -- Noun Replacements table
+-- CREATE TABLE IF NOT EXISTS translations_db.noun_replacements (
+--     id INT PRIMARY KEY,
+--     english_noun VARCHAR(255),
+--     french_noun VARCHAR(255)
+-- );
+
 CREATE TABLE IF NOT EXISTS translations_db.noun_replacements (
-    id INT PRIMARY KEY,
-    english_noun VARCHAR(255),
-    french_noun VARCHAR(255)
-);
+  id int NOT NULL,
+  english_noun varchar(255),
+  french_noun varchar(255),
+  PRIMARY KEY (id),
+  UNIQUE KEY(english_noun, french_noun)
+)
