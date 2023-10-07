@@ -99,12 +99,13 @@ class TranslatorService:
                 logger.info("Performing Sentence translation...")
                 logger.info("Fetch the Similar sentence from DB...")
                 # TODO - Implement functionality to check If only nouns are differentiated between 2 sentences
-                closest_translated_text = self.fetch_most_similar_translation_from_db(db, text)
+                closest_translation = self.fetch_most_similar_translation_from_db(db, text)
 
-                if closest_translated_text:
+                if closest_translation:
                     # Noun Replacement
                     logger.info("Similar translation found. Performing noun replacement...")
-                    noun_replaced_text = self.replace_nouns(db, text, closest_translated_text)
+                    # noun_replaced_text = self.replace_nouns(db, text, closest_translated_text)
+                    noun_replaced_text = self.replace_nouns_updated(db, text, closest_translation)
                     if noun_replaced_text:
                         translated_text = noun_replaced_text
                         logger.info(f"Translation performed successfully and the translated text is: {translated_text}")
@@ -131,10 +132,10 @@ class TranslatorService:
             print(f"Error in perform_translation: {e}")
             raise TranslationServiceException("Translation service error")
 
-
     def fetch_most_similar_translation_from_db(self, db, input_sentence):
         # Variables to keep track of the most similar sentence and its similarity score
         most_similar_fr_translation_id = None
+        most_similar_en_sentence = None
         highest_similarity_score = -1.0
 
         # Retrieve existing French sentences from the table
@@ -150,12 +151,16 @@ class TranslatorService:
             if similarity_score >= 0.90 and similarity_score > highest_similarity_score:
                 highest_similarity_score = similarity_score
                 most_similar_fr_translation_id = existing_translation['french_sentence_id']
+                most_similar_en_sentence = existing_translation['english_sentence']
 
         result = db.execute_query(
             f"SELECT french_sentence FROM french_sentences where id='{most_similar_fr_translation_id}'")
         most_similar_translated_text = result[0]['french_sentence'] if result else None
 
-        return most_similar_translated_text
+        if most_similar_translated_text and most_similar_en_sentence:
+            similar_translation = {'english_sentence': most_similar_en_sentence,
+                                   'french_sentence': most_similar_translated_text}
+            return similar_translation
 
     def extract_en_nouns(self, en_sentence):
         """
@@ -247,6 +252,59 @@ class TranslatorService:
                 # Return the translation only when all the nouns and numbers are replaced properly
                 return closest_french_translation
 
+    def replace_nouns_updated(self, db, input_english_sentence, closest_translation):
+        """
+        Function to replace nouns in the closest French translation of a given English sentence
+        :param input_english_sentence:
+        :param closest_translation:
+        :return:
+        """
+        input_english_sentence_nouns = self.extract_en_nouns(input_english_sentence)
+        closest_english_sentence_nouns = self.extract_en_nouns(closest_translation['english_sentence'])
+        closest_french_translation = closest_translation['french_sentence']
+        logger.info("input_english_sentence_nouns: " + str(input_english_sentence_nouns))
+        logger.info("closest_english_sentence_nouns: " + str(closest_english_sentence_nouns))
+        logger.info("closest_french_translation: " + str(closest_french_translation))
+        # closest_french_sentence_nouns = self.extract_fr_nouns(closest_french_translation)
+
+        if len(input_english_sentence_nouns) == len(closest_english_sentence_nouns):
+            for en_noun, closest_en_noun in zip(input_english_sentence_nouns, closest_english_sentence_nouns):
+                if en_noun == closest_en_noun:
+                    pass
+                else:
+                    # Check for existing noun replacements
+                    fr_noun = self.lookup_fr_noun(db, en_noun)
+                    existing_fr_noun = self.lookup_fr_noun(db, closest_en_noun) if len(closest_en_noun) > 1 else closest_en_noun
+                    if fr_noun is not None and existing_fr_noun is not None:
+                        if existing_fr_noun is not None:
+                            # Replace the noun in the translation
+                            closest_french_translation = closest_french_translation.replace(
+                                existing_fr_noun, fr_noun)
+                    else:
+                        # Existing french noun replacement not found. So, fetching the noun translation using NLP model
+                        fr_noun = self.perform_translation(db, text=en_noun) if len(en_noun) > 1 else en_noun
+
+                        closest_french_translation = closest_french_translation.replace(
+                            existing_fr_noun, fr_noun)
+                        # Adding the translated noun to Noun Replacement table in database
+                        self.save_word_translation(db, en_noun, fr_noun)
+
+            # Replace numbers
+            # Regular expression pattern to match numbers with optional decimal point or comma
+            pattern = r'(\d+(?:[.,]\d+)?)'
+
+            # Find all numbers in each sentence
+            numbers1 = re.findall(pattern, input_english_sentence)
+            numbers2 = re.findall(pattern, closest_french_translation)
+
+            # Checking if the sentence is having same number of
+            if len(numbers1) + len(numbers2) != 0 and len(numbers1) == len(numbers2):
+                for num2, num1 in zip(numbers2, numbers1):
+                    closest_french_translation = closest_french_translation.replace(num2, num1)
+
+            # Return the translation only when all the nouns and numbers are replaced properly
+            return closest_french_translation
+
     def save_word_translation(self, db, word, translated_word):
         """
         Save the word translation in database.
@@ -260,7 +318,7 @@ class TranslatorService:
             # Add Word translation to database
             logger.info("Adding word translation to the database")
             add_word_query = "INSERT IGNORE INTO noun_replacements (id, english_noun, french_noun) VALUES (%s, %s, %s);"
-            fr_params = (uid, word, translated_word)
+            fr_params = (uid, word, translated_word.replace("'", "\'"))
             db.execute_query(add_word_query, fr_params)
             logger.info("Word translation added to the database")
 
@@ -305,7 +363,6 @@ class TranslatorService:
         except Exception as e:
             logger.error(f"Error in save_noun_replacements: {e}")
             raise DatabaseException("Database error")
-
 
     def save_translation(self, db, text, translation_text):
         """
