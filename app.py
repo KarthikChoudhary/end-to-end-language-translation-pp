@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 import uvicorn
 import sys
 import os
@@ -6,15 +6,22 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse
 from fastapi.responses import Response
 from src.textSummarizer.pipeline.prediction import PredictionPipeline
+from textSummarizer.conponents.Translator import TranslatorService
 
-text:str = "What is Text Summarization?"
+text: str = "What is Text Summarization?"
 
 app = FastAPI()
+
+
+@app.on_event("startup")
+async def startup_event():
+    # Initialize the translator_service during app startup
+    app.translator_service = TranslatorService()
+
 
 @app.get("/", tags=["authentication"])
 async def index():
     return RedirectResponse(url="/docs")
-
 
 
 @app.get("/train")
@@ -25,20 +32,18 @@ async def training():
 
     except Exception as e:
         return Response(f"Error Occurred! {e}")
-    
-
 
 
 @app.post("/predict")
-async def predict_route(text):
+async def predict_route(input_text):
     try:
-
         obj = PredictionPipeline()
-        text = obj.predict(text)
-        return text
+        translator_service = app.translator_service
+        translated_text = obj.predict(input_text, translator_service=translator_service)
+        return translated_text
     except Exception as e:
         raise e
-    
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)

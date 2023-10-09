@@ -7,18 +7,17 @@ from src.textSummarizer.utils.common import get_mysql_db
 from transformers import pipeline
 from fastapi import HTTPException
 
+
 class PredictionPipeline:
     def __init__(self):
         self.config = ConfigurationManager().get_model_evaluation_config()
         self.output = ""
 
-
-    def predict(self,text):
+    def predict(self, text, translator_service: TranslatorService):
         try:
             logger.info("Original Text:")
             logger.info(text)
             db = get_mysql_db()
-            translator_service = TranslatorService()
             translated_text = translator_service.get_translation(db, text)
 
             if translated_text is None:
@@ -47,7 +46,7 @@ class PredictionPipeline:
                 self.output = translation_text
             else:
                 self.output = translated_text
-            
+
             return self.output
 
         except TranslationServiceException as tse:

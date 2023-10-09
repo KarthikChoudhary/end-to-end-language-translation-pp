@@ -136,22 +136,28 @@ class TranslatorService:
         # Variables to keep track of the most similar sentence and its similarity score
         most_similar_fr_translation_id = None
         most_similar_en_sentence = None
-        highest_similarity_score = -1.0
 
         # Retrieve existing French sentences from the table
         existing_translations = db.execute_query(
             "SELECT french_sentence_id, english_sentence FROM english_sentences")
 
-        # Checking similarity with each existing sentence
-        for existing_translation in existing_translations:
-            similarity_score = self.nlp_eng(input_sentence).similarity(
-                self.nlp_eng(existing_translation['english_sentence']))
+        if len(input_sentence.strip().split()) > 3:
+            highest_similarity_score = -1.0
+            # Checking similarity with each existing sentence
+            for existing_translation in existing_translations:
+                similarity_score = self.nlp_eng(input_sentence).similarity(
+                    self.nlp_eng(existing_translation['english_sentence']))
 
-            # Check if similarity is above the threshold and higher than the current highest score
-            if similarity_score >= 0.90 and similarity_score > highest_similarity_score:
-                highest_similarity_score = similarity_score
-                most_similar_fr_translation_id = existing_translation['french_sentence_id']
-                most_similar_en_sentence = existing_translation['english_sentence']
+                # Check if similarity is above the threshold and higher than the current highest score
+                if similarity_score >= 0.89 and similarity_score > highest_similarity_score:
+                    highest_similarity_score = similarity_score
+                    most_similar_fr_translation_id = existing_translation['french_sentence_id']
+                    most_similar_en_sentence = existing_translation['english_sentence']
+        else:
+            for existing_translation in existing_translations:
+                if self.check_phrase_similarity(input_sentence, existing_translation['english_sentence']):
+                    most_similar_fr_translation_id = existing_translation['french_sentence_id']
+                    most_similar_en_sentence = existing_translation['english_sentence']
 
         result = db.execute_query(
             f"SELECT french_sentence FROM french_sentences where id='{most_similar_fr_translation_id}'")
@@ -161,6 +167,28 @@ class TranslatorService:
             similar_translation = {'english_sentence': most_similar_en_sentence,
                                    'french_sentence': most_similar_translated_text}
             return similar_translation
+
+    def check_phrase_similarity(self, sentence1, sentence2):
+        """
+        Check if two sentences have at least 2 words that match at the same position when the length is 3.
+        """
+        # Tokenize and preprocess the sentences
+        sentence1 = sentence1.strip().split()
+        sentence2 = sentence2.strip().split()
+
+        # Check if both sentences have the same number of words (up to 4 words)
+        if len(sentence1) == len(sentence2) and len(sentence1) <= 4:
+            # When the length is 3, check if at least 2 words match at the same position
+            if len(sentence1) == 3:
+                match_count = sum(1 for word1, word2 in zip(sentence1, sentence2) if word1 == word2)
+                if match_count >= 2:
+                    return True
+            else:
+                # For other lengths, check if at least one word matches at the same position
+                for word1, word2 in zip(sentence1, sentence2):
+                    if word1 == word2:
+                        return True
+        return False
 
     def extract_en_nouns(self, en_sentence):
         """
@@ -259,35 +287,41 @@ class TranslatorService:
         :param closest_translation:
         :return:
         """
-        input_english_sentence_nouns = self.extract_en_nouns(input_english_sentence)
-        closest_english_sentence_nouns = self.extract_en_nouns(closest_translation['english_sentence'])
-        closest_french_translation = closest_translation['french_sentence']
-        logger.info("input_english_sentence_nouns: " + str(input_english_sentence_nouns))
-        logger.info("closest_english_sentence_nouns: " + str(closest_english_sentence_nouns))
-        logger.info("closest_french_translation: " + str(closest_french_translation))
+        closest_french_translation = str(closest_translation['french_sentence']).lower()
         # closest_french_sentence_nouns = self.extract_fr_nouns(closest_french_translation)
+        if len(input_english_sentence.split()) > 3:
+            input_english_sentence_nouns = self.extract_en_nouns(input_english_sentence)
+            closest_english_sentence_nouns = self.extract_en_nouns(closest_translation['english_sentence'])
+        else:
+            # When the sentence length is less than 3 words
+            input_english_sentence_nouns = input_english_sentence.strip().split()
+            closest_english_sentence_nouns = closest_translation['english_sentence'].strip().split()
 
         if len(input_english_sentence_nouns) == len(closest_english_sentence_nouns):
             for en_noun, closest_en_noun in zip(input_english_sentence_nouns, closest_english_sentence_nouns):
-                if en_noun == closest_en_noun:
+                if en_noun.lower() == closest_en_noun.lower():
                     pass
                 else:
                     # Check for existing noun replacements
                     fr_noun = self.lookup_fr_noun(db, en_noun)
-                    existing_fr_noun = self.lookup_fr_noun(db, closest_en_noun) if len(closest_en_noun) > 1 else closest_en_noun
-                    if fr_noun is not None and existing_fr_noun is not None:
+                    existing_fr_noun = self.lookup_fr_noun(db, closest_en_noun) if len(
+                        closest_en_noun) > 1 else closest_en_noun
+                    if fr_noun is not None:
                         if existing_fr_noun is not None:
                             # Replace the noun in the translation
                             closest_french_translation = closest_french_translation.replace(
-                                existing_fr_noun, fr_noun)
+                                existing_fr_noun.lower(), fr_noun.lower())
+                        else:
+                            logger.info("No noun found in the noun replacement table, sending the sentence to model translation...")
+                            return None
                     else:
                         # Existing french noun replacement not found. So, fetching the noun translation using NLP model
                         fr_noun = self.perform_translation(db, text=en_noun) if len(en_noun) > 1 else en_noun
 
                         closest_french_translation = closest_french_translation.replace(
-                            existing_fr_noun, fr_noun)
+                            existing_fr_noun.lower(), fr_noun.lower())
                         # Adding the translated noun to Noun Replacement table in database
-                        self.save_word_translation(db, en_noun, fr_noun)
+                        self.save_word_translation(db, en_noun.lower(), fr_noun.lower())
 
             # Replace numbers
             # Regular expression pattern to match numbers with optional decimal point or comma

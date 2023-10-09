@@ -1,11 +1,20 @@
 import streamlit as st
 from streamlit_chat import message
+
 from src.textSummarizer.pipeline.prediction import PredictionPipeline
 from src.textSummarizer.logging import logger
+from textSummarizer.conponents.Translator import TranslatorService
+
+
+# Define a function to initialize the Translator Service (only called once)
+@st.cache_resource(show_spinner="Please wait...")
+def initialize_translator_service():
+    return TranslatorService()
+
 
 # Setting page title and header
 st.set_page_config(page_title="AVA", page_icon=":robot_face:")
-st.markdown("<h1 style='text-align: center;'>Language Translation 😬</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>Product Label Translator</h1>", unsafe_allow_html=True)
 
 # Initialise session state variables
 if 'generated' not in st.session_state:
@@ -30,11 +39,15 @@ if clear_button:
         {"role": "system", "content": "You are a helpful assistant."}
     ]
 
+# Initialize the Translator Service
+translator_service = initialize_translator_service()
+
+
 # generate a response
-def generate_response(prompt):    
+def generate_response(prompt):
     st.session_state['messages'].append({"role": "user", "content": prompt})
     obj = PredictionPipeline()
-    response = obj.predict(prompt)
+    response = obj.predict(prompt, translator_service=translator_service)
     logger.info(f"generated response is : {response}")
     st.session_state['messages'].append({"role": "assistant", "content": response})
 
